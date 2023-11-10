@@ -1,4 +1,4 @@
-# Codenames
+# NLP Codenames Strategy Bot
 
 I used Numpy and Re to implement Word2vec's CBOW model from scratch by processing a corpus and training a feed-forward neural network to generate word embedding vectors. 
 Using the training embeddings, I returned the word whose embedding's Euclidean distance from the target word's embedding was minimum. 
