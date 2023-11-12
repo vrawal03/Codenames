@@ -2,119 +2,132 @@ import numpy as np
 import re
 from collections import Counter
 
-# Tokenize corpus
-def tokenize(corpus):
-    # Split corpus into a list of words
-    tokens = re.findall(r'\b\w+\b', corpus.lower())
-    return tokens
+# Set the seed for random number generation
+np.random.seed(0)
 
-# Build vocabulary
-def build_vocabulary(tokens, vocab_size=None):
-    # Count tokens and sort by frequency
-    vocabulary = Counter(tokens)
-    if vocab_size:
-        # If a vocab size is specified, limit the vocabulary to the top 'vocab_size' terms
-        vocabulary = {word: count for word, count in vocabulary.most_common(vocab_size)}
-    return vocabulary
+# Function to extract words from a given string
+def extract_words(input_text):
+    word_pattern = re.compile(r'[A-Za-z]+[\w^\']*|[\w^\']*[A-Za-z]+[\w^\']*')
+    return word_pattern.findall(input_text.lower())
 
-# Create word to index mapping
-def word_to_one_hot(word, word_to_id, vocab_size):
-    # Initialize a zero vector with the length of the vocabulary
-    one_hot = np.zeros(vocab_size)
-    # Set the index of the word to 1
-    one_hot[word_to_id[word]] = 1
-    return one_hot
+# Sample text for processing
+sample_text = '''Ice cream is cold. Ice cream is sweet. Cold ice and sweet cream. Ice cream is the best.'''
 
-# Generate training data for CBOW
-def generate_training_data(tokens, word_to_id, window_size):
-    N = len(tokens)
-    X, Y = [], []
+# Extracting words from the text
+word_list = extract_words(sample_text)
 
-    for i in range(N):
-        # Define the start and end index of the context
-        start = max(0, i - window_size)
-        end = min(N, i + window_size + 1)
-        context = [tokens[j] for j in range(start, end) if j != i]
-        # Use one-hot encoding for context words and target word
-        context_vectors = [word_to_one_hot(w, word_to_id, len(word_to_id)) for w in context]
-        target = word_to_one_hot(tokens[i], word_to_id, len(word_to_id))
-        # Append the mean of the context vectors and the target word vector to the training data
-        X.append(np.mean(context_vectors, axis=0))
-        Y.append(target)
-    return np.array(X), np.array(Y)
+# Function to create mappings between words and their numerical representations
+def create_mappings(words):
+    word_index_map = {}
+    index_word_map = {}
+    unique_words = set(words)
 
-# Initialize network
-def init_network(vocab_size, hidden_size):
+    for index, word in enumerate(unique_words):
+        word_index_map[word] = index
+        index_word_map[index] = word
+
+    return word_index_map, index_word_map
+
+# Creating mappings
+index_map, word_map = create_mappings(word_list)
+
+# Function to generate training pairs
+def generate_pairs(words, mapping, window_size):
+    input_data = []
+    target_data = []
+    num_words = len(words)
+
+    for index in range(num_words):
+        for i in range(max(0, index - window_size), index):
+            input_data.append(vector_encode(mapping[words[index]], len(mapping)))
+            target_data.append(vector_encode(mapping[words[i]], len(mapping)))
+
+        for j in range(index, min(num_words, index + window_size + 1)):
+            if index == j:
+                continue
+            input_data.append(vector_encode(mapping[words[index]], len(mapping)))
+            target_data.append(vector_encode(mapping[words[j]], len(mapping)))
+
+    return np.array(input_data), np.array(target_data)
+
+# Function for one-hot encoding
+def vector_encode(index, size):
+    vector = [0] * size
+    vector[index] = 1
+    return vector
+
+# Generating training data
+input_vectors, target_vectors = generate_pairs(word_list, index_map, 2)
+
+# Initializing the neural network
+def initialize_network(vocab_size, embedding_dim):
     return {
-        'W1': np.random.randn(vocab_size, hidden_size),
-        'W2': np.random.randn(hidden_size, vocab_size)
+        "layer1_weights": np.random.randn(vocab_size, embedding_dim),
+        "layer2_weights": np.random.randn(embedding_dim, vocab_size)
     }
 
-# Softmax activation
-def softmax(x):
-    e_x = np.exp(x - np.max(x))
-    return e_x / e_x.sum(axis=0)
+# Creating a model
+neural_model = initialize_network(len(index_map), 10)
 
-# Forward pass
-def forward_pass(x, model):
-    h = np.dot(model['W1'].T, x)
-    u = np.dot(model['W2'].T, h)
-    y_c = softmax(u)
-    return y_c, h, u
+# Forward propagation function
+def propagate_forward(network, input_vec, return_intermediate=False):
+    intermediate_values = {}
+    layer1_output = np.dot(input_vec, network["layer1_weights"])
+    layer2_output = np.dot(layer1_output, network["layer2_weights"])
+    softmax_output = apply_softmax(layer2_output)
 
-# Calculate error
-def calculate_error(y, y_pred):
-    return -np.sum(y * np.log(y_pred))
+    intermediate_values["layer1_output"] = layer1_output
+    intermediate_values["layer2_output"] = layer2_output
+    intermediate_values["softmax_output"] = softmax_output
 
-# Backpropagation
-def backpropagate(x, y, y_pred, h, model, learning_rate):
-    e = y_pred - y
-    dW2 = np.outer(h, e)
-    dW1 = np.outer(x, np.dot(model['W2'], e))
-    model['W1'] -= learning_rate * dW1
-    model['W2'] -= learning_rate * dW2
-    return calculate_error(y, y_pred)
+    return intermediate_values
 
-# Training loop
-def train(X, Y, model, epochs, learning_rate):
-    for epoch in range(epochs):
-        loss = 0
-        for x, y in zip(X, Y):
-            y_pred, h, u = forward_pass(x, model)
-            loss += backpropagate(x, y, y_pred, h, model, learning_rate)
-        print(f'Epoch {epoch}, Loss: {loss:.4f}')
+# Softmax function
+def apply_softmax(input_vec):
+    softmax_result = []
+    for vec in input_vec:
+        exp_vec = np.exp(vec)
+        softmax_result.append(exp_vec / np.sum(exp_vec))
+    return softmax_result
 
-# Find the closest word
-def find_closest_word(embedding, word_to_id, model):
-    min_dist = float('inf')
-    closest_word = None
-    for word, index in word_to_id.items():
-        word_embedding = model['W1'][index]
-        distance = np.linalg.norm(embedding - word_embedding)
-        if (distance < min_dist) and (distance > 0):
-            min_dist = distance
-            closest_word = word
-    return closest_word
+# Backward propagation function
+def propagate_backward(network, input_vec, target_vec, learning_rate):
+    intermediate_values = propagate_forward(network, input_vec, return_intermediate=True)
+    error_layer2 = intermediate_values["softmax_output"] - target_vec
+    gradient_layer2 = np.dot(intermediate_values["layer1_output"].T, error_layer2)
+    error_layer1 = np.dot(error_layer2, network["layer2_weights"].T)
+    gradient_layer1 = np.dot(input_vec.T, error_layer1)
 
-# Main execution
-corpus = '''I love ice cream. Ice cream is cold and delicious. Cold ice and sweet cream. Ice cream is the best. '''
+    network["layer1_weights"] -= learning_rate * gradient_layer1
+    network["layer2_weights"] -= learning_rate * gradient_layer2
 
-tokens = tokenize(corpus)
-vocabulary = build_vocabulary(tokens)
-word_to_id = {word: i for i, word in enumerate(vocabulary.keys())}
-id_to_word = {i: word for i, word in enumerate(vocabulary.keys())}
+    return calculate_loss(intermediate_values["softmax_output"], target_vec)
 
-window_size = 2
-X, Y = generate_training_data(tokens, word_to_id, window_size)
+# Cross-entropy loss function
+def calculate_loss(predicted, actual):
+    return -np.sum(np.log(predicted) * actual)
 
-hidden_size = 100  # Size of the hidden layer
-model = init_network(len(word_to_id), hidden_size)
+# Training the model
+num_iterations = 1000
+alpha = 0.001
+loss_history = []
+for i in range(num_iterations):
+    loss = propagate_backward(neural_model, input_vectors, target_vectors, alpha)
+    loss_history.append(loss)
 
-epochs = 1000
-learning_rate = 0.001
-train(X, Y, model, epochs, learning_rate)
+# One-hot encoding for a specific word
+test_word_vector = vector_encode(index_map["cream"], len(index_map))
 
-# Example of finding the closest word
-word_embedding = model['W1'][word_to_id['cream']]  # Replace 'example' with your word
-closest_word = find_closest_word(word_embedding, word_to_id, model)
-print(f'The closest word to "cream" is "{closest_word}".')
+# Reshaping and feeding into the model
+test_word_vector_reshaped = np.array([test_word_vector])
+output_cache = propagate_forward(neural_model, test_word_vector_reshaped, return_intermediate=True)
+output_result = output_cache['softmax_output'][0]
+
+# Displaying the words based on the softmax output
+sorted_indices = np.argsort(output_result)[::-1]
+sorted_words = [word_map[id] for id in sorted_indices]
+print("Sorted words by closeness to cream: ") 
+for word in sorted_words:
+  print(word)
+
+# sorted_words[0] is 'ice', as expected.
