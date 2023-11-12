@@ -131,3 +131,31 @@ for word in sorted_words:
   print(word)
 
 # sorted_words[0] is 'ice', as expected.
+
+# Extract word embeddings for K-means clustering
+word_embeddings = neural_model["layer1_weights"]
+word_embeddings_np = np.array(word_embeddings)
+
+k = 3
+kmeans = KMeans(n_clusters=k, random_state=0)
+
+kmeans.fit(word_embeddings_np)
+
+labels = kmeans.labels_
+print("Cluster assignments:", labels)
+# Check if the KMeans model has been fitted correctly
+if kmeans.labels_ is not None:
+  # Initialize an empty dictionary for the word to cluster map
+  word_cluster_map = {}
+
+  # Check if index_map is initialized and not empty
+  if index_map is not None:
+    # Iterate through each word and its index in the index_map
+    for word, index in index_map.items():
+      # Get the cluster assignment for each word and add it to the dictionary
+      word_cluster_map[word] = kmeans.labels_[index]
+
+  print(word_cluster_map)
+
+else:
+  print("Error: KMeans model not fitted properly.")
